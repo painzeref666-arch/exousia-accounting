@@ -3,10 +3,10 @@ import { createRoot } from 'react-dom/client';
 import {
   LayoutDashboard, ShoppingCart, Receipt, WalletCards, BarChart3,
   Settings, Search, Plus, RefreshCw, LogOut, Menu, TrendingUp,
-  TrendingDown, Package, AlertTriangle
+  TrendingDown, Package, AlertTriangle, BookOpen, Scale
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
-import { getDashboardData, getSales, getExpenses, getAccounts, createExpense, money, dateLabel } from './lib/accounting';
+import { getDashboardData, getSales, getExpenses, getAccounts, createExpense, getLedger, getTrialBalance, money, dateLabel } from './lib/accounting';
 import './styles.css';
 
 const nav = [
@@ -15,6 +15,8 @@ const nav = [
   ['expenses', 'Expenses', Receipt],
   ['accounts', 'Accounts', WalletCards],
   ['reports', 'Reports', BarChart3],
+  ['ledger', 'General Ledger', BookOpen],
+  ['trial', 'Trial Balance', Scale],
   ['settings', 'Settings', Settings]
 ];
 
@@ -101,6 +103,19 @@ function Reports({ data, error }) {
   return <><Title title="Reports" sub="Management-level accounting reports" />{error ? <div className="error">{error}</div> : <div className="grid three"><div className="card report"><BarChart3 /><b>Profit & Loss</b><small>Revenue less expenses</small><strong>{data ? money(data.sales - data.expenses) : '—'}</strong></div><div className="card report"><ShoppingCart /><b>Sales report</b><small>Store orders</small><strong>{data ? money(data.sales) : '—'}</strong></div><div className="card report"><Package /><b>Inventory</b><small>Current units</small><strong>{data ? data.stock.toLocaleString() : '—'} units</strong></div></div>}<div className="card"><h3>Architecture</h3><p className="muted">This accounting portal is a separate application. It reads the same Supabase project as the storefront, without changing storefront code.</p></div></>;
 }
 
+
+function Ledger({ rows, error }) {
+  const entries = Array.isArray(rows) ? rows : [];
+  return <><Title title="General Ledger" sub="Posted double-entry journal transactions" />{error ? <div className="error">{error}</div> : <div className="card table"><table><thead><tr><th>Date</th><th>Entry</th><th>Source</th><th>Description</th><th>Account</th><th>Debit</th><th>Credit</th></tr></thead><tbody>{entries.flatMap(e => (e.journal_lines || []).map((l, i) => <tr key={`${e.id}-${l.id || i}`}><td>{dateLabel(e.entry_date)}</td><td>{e.entry_number}</td><td>{e.source_type}</td><td>{l.description || e.description}</td><td>{l.accounts?.code} — {l.accounts?.name}</td><td className="right">{money(l.debit)}</td><td className="right">{money(l.credit)}</td></tr>))}{!entries.length && <tr><td colSpan="7" className="empty">No journal entries yet.</td></tr>}</tbody></table></div>}</>;
+}
+
+function TrialBalance({ rows, error }) {
+  const list = Array.isArray(rows) ? rows : [];
+  const debit = list.reduce((a,x)=>a+Number(x.debit||0),0);
+  const credit = list.reduce((a,x)=>a+Number(x.credit||0),0);
+  return <><Title title="Trial Balance" sub="Account balances from posted journal lines" />{error ? <div className="error">{error}</div> : <div className="card table"><table><thead><tr><th>Code</th><th>Account</th><th>Type</th><th>Debit</th><th>Credit</th></tr></thead><tbody>{list.map(x=><tr key={x.code}><td>{x.code}</td><td>{x.name}</td><td>{x.type}</td><td className="right">{money(x.debit)}</td><td className="right">{money(x.credit)}</td></tr>)}<tr><th colSpan="3">Total</th><th className="right">{money(debit)}</th><th className="right">{money(credit)}</th></tr>{!list.length && <tr><td colSpan="5" className="empty">No posted journal lines yet.</td></tr>}</tbody></table></div>}</>;
+}
+
 function SettingsPage() {
   return <><Title title="Settings" sub="Accounting application settings" /><div className="card settings"><div><span>Supabase</span><b className="good">Connected</b></div><div><span>Application</span><b>Standalone Accounting</b></div><div><span>Storefront</span><b>Exousia & Co.</b></div><div><span>Currency</span><b>PHP (₱)</b></div></div></>;
 }
@@ -116,6 +131,8 @@ function Shell({ session }) {
   const [sales, setSales] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [ledger, setLedger] = useState([]);
+  const [trial, setTrial] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -126,6 +143,8 @@ function Shell({ session }) {
       if (target === 'sales') setSales(await getSales());
       if (target === 'expenses') setExpenses(await getExpenses());
       if (target === 'accounts') setAccounts(await getAccounts());
+      if (target === 'ledger') setLedger(await getLedger());
+      if (target === 'trial') setTrial(await getTrialBalance());
     } catch (e) { setError(e?.message || 'Could not load data'); }
     finally { setLoading(false); }
   }
@@ -140,6 +159,8 @@ function Shell({ session }) {
     : page === 'expenses' ? <Expenses rows={expenses} load={() => loadPage('expenses')} error={error} />
     : page === 'accounts' ? <Accounts rows={accounts} error={error} />
     : page === 'reports' ? <Reports data={data} error={error} />
+    : page === 'ledger' ? <Ledger rows={ledger} error={error} />
+    : page === 'trial' ? <TrialBalance rows={trial} error={error} />
     : <SettingsPage />;
 
   return <div className="app"><aside className={open ? 'open' : ''}><div className="brand"><div className="mark small">E<span>&</span>C</div><div><b>Exousia & Co.</b><small>ACCOUNTING</small></div></div><nav>{nav.map(([id, t, Icon]) => <button type="button" className={page === id ? 'active' : ''} onClick={() => { setPage(id); setOpen(false); }} key={id}><Icon size={18} />{t}</button>)}</nav><button type="button" className="signout" onClick={() => supabase.auth.signOut()}><LogOut size={17} />Sign out</button></aside><main><header><button type="button" className="hamb" onClick={() => setOpen(!open)}><Menu /></button><div><h2>{title}</h2><small>{session.user.email}</small></div><span className="connected">● Connected</span></header><section className="content">{content}</section></main></div>;
